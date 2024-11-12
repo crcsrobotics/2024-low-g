@@ -105,6 +105,10 @@ void loop() {
     robotBackward(1);
   }
 
+  if (gizmo.getAxis(GIZMO_AXIS_DY) == 0) {
+    robotForward(1);
+  }
+
   Serial.println("Rake Pot:" + String(analogRead(rakePot)));
   Serial.println("Collision Switch:" + String(digitalRead(collisionSwitch)));
 
@@ -202,7 +206,7 @@ void autonomousTask() {
 }
 
 void robotForward(float speed) {
-  driveLeft.write(MOTOR_CLOCKWISE * speed);
+  driveLeft.write(MOTOR_COUNTERCLOCKWISE * speed);
   driveRight.write(MOTOR_COUNTERCLOCKWISE * speed);
 }
 
