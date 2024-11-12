@@ -168,13 +168,8 @@ void autonomousTask() {
   // pause for dramatic effect 💅
   delay(1000);
 
-  // Raise rake to preliminary angle
-  moveMotor(45, rakeMotor, rakePot);
+  moveRake(45);
 
-  // accounting for duration of motion
-  delay(1000);
-
-  // drive until wall
   while(digitalRead(collisionSwitch) != HIGH) {
     robotForward(1);
 
@@ -186,7 +181,7 @@ void autonomousTask() {
   }
 
   // lower rake all the way
-  moveMotor(90, rakeMotor, rakePot);
+  moveRake(45);
 
   const float BACKUP_SPEED = 0.25;
   robotBackward(BACKUP_SPEED);
@@ -200,9 +195,32 @@ void autonomousTask() {
 
   robotStop();
 
-  moveMotor(0, rakeMotor, rakePot);
+  moveRake(-90);
 
   isAutonomous = false;
+}
+
+void moveRake(int degree) {
+  // rpm
+  const int MOTOR_SPEED = 90;
+  // total length of string to move from 0 to 360 degrees
+  const int STRING_LENGTH = 44;
+
+  const float SPOOL_CIRCUMFERENCE = 2.845;
+
+  const float REQUIRED_ROTATIONS = STRING_LENGTH / SPOOL_CIRCUMFERENCE;
+
+  const float REQUIRED_DURATION = (60 * REQUIRED_ROTATIONS) / MOTOR_SPEED;
+
+  const float PERCENTAGE = degree / 360;
+
+  if (degree < 0) {
+    rakeMotor.write(MOTOR_COUNTERCLOCKWISE);
+  } else {
+    rakeMotor.write(MOTOR_CLOCKWISE);
+  }
+
+  delay(REQUIRED_DURATION * PERCENTAGE * 1000);
 }
 
 void robotForward(float speed) {
@@ -218,21 +236,6 @@ void robotBackward(float speed) {
 void robotStop() {
   driveLeft.write(MOTOR_STATIONARY);
   driveRight.write(MOTOR_STATIONARY);
-}
-
-void moveMotor(int posDegrees, Servo &motor, int pot) {
-  // Convert the potentiometer position to degrees
-  int position = map(analogRead(pot), 0, 1024, 0, 180);
-
-  while (position != posDegrees) {
-    if (position < posDegrees) {
-      motor.write(MOTOR_CLOCKWISE);
-    } else {
-      motor.write(MOTOR_COUNTERCLOCKWISE);
-    }
-  }
-
-  motor.write(MOTOR_STATIONARY);
 }
 
 void buttonInit() {
