@@ -14,15 +14,15 @@ std::map<int, Button> buttonMap;
 const int MOTOR_CLOCKWISE = 180, MOTOR_COUNTERCLOCKWISE = 0, MOTOR_STATIONARY = 90;
 
 Servo driveLeft, driveRight;
-Servo hipMotor, rakeMotor;
+Servo hipServo, rakeServo;
 
-Servo safetyBarServo;
 Servo mmmFloorLeft, mmmFloorRight;
 
 bool isAutonomous = false;
 
-int rakePot = GIZMO_ADC_1;
 int collisionSwitch = GIZMO_GPIO_1;
+
+bool mmmClosed = true;
 
 
 // The Gizmo provides access to the data that is held by the field
@@ -36,6 +36,14 @@ Gizmo gizmo;
   Manny Safety Bar = Btn-A
   MMM floor = Btn-B
 
+*/
+
+/* Logging standards
+  ctx = function name, affected assembly, or general context
+  name = value name
+  val = actual value
+
+  Serial.println("ctx_name:val");
 */
 
 // Initialize the hardware and configure libraries for use.
@@ -54,25 +62,22 @@ void setup() {
 
   pinMode(GIZMO_SERVO_1, OUTPUT);
   pinMode(GIZMO_SERVO_2, OUTPUT);
-  pinMode(GIZMO_SERVO_3, OUTPUT);
 
-  pinMode(rakePot, INPUT);
   pinMode(collisionSwitch, INPUT);
 
   buttonInit();
   
-  driveLeft.attach(GIZMO_MOTOR_1);
-  driveRight.attach(GIZMO_MOTOR_2);
+  driveLeft.attach(GIZMO_MOTOR_3);
+  driveRight.attach(GIZMO_MOTOR_1);
 
-  hipMotor.attach(GIZMO_MOTOR_3);
-  rakeMotor.attach(GIZMO_MOTOR_4);
-
-  safetyBarServo.attach(GIZMO_SERVO_1);
-  safetyBarServo.write(0);
+  hipServo.attach(GIZMO_SERVO_3);
+  rakeServo.attach(GIZMO_SERVO_4);
+  rakeServo.write(0);
+  hipServo.write(0);
 
   mmmFloorLeft.attach(GIZMO_SERVO_2);
   mmmFloorLeft.write(0);
-  mmmFloorRight.attach(GIZMO_SERVO_3);
+  mmmFloorRight.attach(GIZMO_SERVO_1);
   mmmFloorRight.write(0);
 }
 
@@ -85,60 +90,74 @@ void loop() {
   // Refreshes the information about axis and button state.
   gizmo.refresh();
 
-  if (buttonJustPressed(GIZMO_BUTTON_START)) {
-    isAutonomous = true;
-  }
+  // if (buttonJustPressed(GIZMO_BUTTON_START)) {
+  //   isAutonomous = true;
+  // }
 
-  if (buttonJustPressed(GIZMO_BUTTON_BACK)) {
-    isAutonomous = false;
-  }
+  // if (buttonJustPressed(GIZMO_BUTTON_BACK)) {
+  //   isAutonomous = false;
+  // }
 
-  if (isAutonomous) {
-    autonomousTask();
-    return;
-  }
+  // Serial.println("auTask_isAutonomous:" + String(isAutonomous));
+
+  // if (isAutonomous) {
+  //   autonomousTask();
+  //   return;
+  // }
+
+  // // this is right next to the drive logic in order to override the drive commands sent if you are pressing the joysticks.
+  // if (gizmo.getAxis(GIZMO_AXIS_DY) == 254) {
+  //   robotBackward(1);
+  // }
+
+  // else if (gizmo.getAxis(GIZMO_AXIS_DY) == 0) {
+  //   robotForward(1);
+  // }
+
+  // else if (gizmo.getAxis(GIZMO_AXIS_DX) == 254) {
+  //   robotClockwise(1);
+  // }
+
+  // else if (gizmo.getAxis(GIZMO_AXIS_DX) == 0) {
+  //   robotCounterclockwise(1);
+  // }
+
+  // else {
+  //   robotStop();
+  // }
 
   driveLogic();
-  
-  // this is right next to the drive logic in order to override the drive commands sent if you are pressing the joysticks.
-  if (gizmo.getAxis(GIZMO_AXIS_DY) == 254) {
-    robotBackward(1);
-  }
 
-  if (gizmo.getAxis(GIZMO_AXIS_DY) == 0) {
-    robotForward(1);
-  }
-
-  Serial.println("Rake Pot:" + String(analogRead(rakePot)));
-  Serial.println("Collision Switch:" + String(digitalRead(collisionSwitch)));
+  // Serial.println("auTask_collisionSwitch:" + String(digitalRead(collisionSwitch)));
 
   // Floor logic
   if (buttonJustPressed(GIZMO_BUTTON_B)) {
-    servoToggle(mmmFloorLeft, 0, 180);
+    servoToggle(mmmFloorLeft, 180, 0);
     servoToggle(mmmFloorRight, 180, 0);
+
+    if (mmmClosed) {
+      mmmFloorRight.write(180);
+      mmmFloorLeft.write(0);
+    }
+
+    else {
+      mmmFloorRight.write(0);
+      mmmFloorLeft.write(180);
+    }
+
+    mmmClosed = !mmmClosed;
   }
 
-  if (gizmo.getButton(GIZMO_BUTTON_LSHOULDER)) {
+  // HiP logic
+  if (buttonJustPressed(GIZMO_BUTTON_LSHOULDER)) {
     // Full speed couterclockwwise
-    hipMotor.write(MOTOR_COUNTERCLOCKWISE);
-  } else if (gizmo.getButton(GIZMO_BUTTON_LT)) {
+    hipServo.write(90);
+  } else if (buttonJustPressed(GIZMO_BUTTON_LT)) {
     // Full speed clockwise
-    hipMotor.write(MOTOR_CLOCKWISE);
-  } else {
-    // No speed
-    hipMotor.write(MOTOR_STATIONARY);
+    hipServo.write(0);
   }
 
-  if (gizmo.getButton(GIZMO_BUTTON_RSHOULDER)) {
-    // Full speed counterclockwise
-    rakeMotor.write(MOTOR_COUNTERCLOCKWISE);
-   } else if (gizmo.getButton(GIZMO_BUTTON_RT)) {
-    // Full speed clockwise
-    rakeMotor.write(MOTOR_CLOCKWISE);
-  } else {
-    // No speed
-    rakeMotor.write(MOTOR_STATIONARY);
-  }
+  rakeLogic();
 
   buttonUpdate();
 
@@ -149,13 +168,18 @@ void loop() {
 void driveLogic() {
   // Fetch the speed of each axis, then convert this to the range
   // expected by the motors.
-  int targetL, targetR;
-  targetL = map(gizmo.getAxis(GIZMO_AXIS_LY), 0, 255, 0, 180);
-  targetR = map(gizmo.getAxis(GIZMO_AXIS_RY), 0, 255, 0, 180);
+  float targetL, targetR;
+  const float SPEED_MULTIPLIER = 1;
+  targetL = map(gizmo.getAxis(GIZMO_AXIS_LY), 0, 255, 180, 0) * SPEED_MULTIPLIER;
+  targetR = map(gizmo.getAxis(GIZMO_AXIS_RY), 0, 255, 0, 180) * SPEED_MULTIPLIER;
 
-  // Write the target speeds to the motor controllers.
-  driveLeft.write(targetL);
-  driveRight.write(targetR);
+  if (targetL != MOTOR_STATIONARY) {
+    driveLeft.write(targetL);
+  }
+
+   if (targetR != MOTOR_STATIONARY) {
+    driveRight.write(targetR);
+  }
 }
 
 void servoToggle(Servo &servo, int min, int max) {
@@ -164,14 +188,29 @@ void servoToggle(Servo &servo, int min, int max) {
   servo.write(target);
 }
 
+void rakeLogic() {
+  const int STEP_SIZE = 1;
+  const int RAKE_POS = rakeServo.read();
+  const int MAX = 90, MIN = 0;
+
+  Serial.println("woooasodifjkasgD");
+
+  if (gizmo.getButton(GIZMO_BUTTON_RSHOULDER)) {
+    rakeServo.write(RAKE_POS + STEP_SIZE);
+  } else if (gizmo.getButton(GIZMO_BUTTON_RT)) {
+    rakeServo.write(RAKE_POS - STEP_SIZE);
+  }
+}
+
 void autonomousTask() {
   // pause for dramatic effect 💅
   delay(1000);
 
-  moveRake(45);
+  // starting rake position
+  rakeServo.write(45);
 
   while(digitalRead(collisionSwitch) != HIGH) {
-    robotForward(1);
+    robotBackward(1);
 
     // allows for task cancelling
     if (gizmo.getButton(GIZMO_BUTTON_BACK)) {
@@ -181,7 +220,7 @@ void autonomousTask() {
   }
 
   // lower rake all the way
-  moveRake(45);
+  rakeServo.write(0);
 
   const float BACKUP_SPEED = 0.25;
   robotBackward(BACKUP_SPEED);
@@ -195,45 +234,38 @@ void autonomousTask() {
 
   robotStop();
 
-  moveRake(-90);
+  // reset the rake
+  rakeServo.write(90);
 
   isAutonomous = false;
 }
 
-void moveRake(int degree) {
-  // rpm
-  const int MOTOR_SPEED = 90;
-  // total length of string to move from 0 to 360 degrees
-  const int STRING_LENGTH = 44;
-
-  const float SPOOL_CIRCUMFERENCE = 2.845;
-
-  const float REQUIRED_ROTATIONS = STRING_LENGTH / SPOOL_CIRCUMFERENCE;
-
-  const float REQUIRED_DURATION = (60 * REQUIRED_ROTATIONS) / MOTOR_SPEED;
-
-  const float PERCENTAGE = degree / 360;
-
-  if (degree < 0) {
-    rakeMotor.write(MOTOR_COUNTERCLOCKWISE);
-  } else {
-    rakeMotor.write(MOTOR_CLOCKWISE);
-  }
-
-  delay(REQUIRED_DURATION * PERCENTAGE * 1000);
+void robotForward(float speed) {
+  Serial.println("robot_y_status:1");
+  driveLeft.write(MOTOR_COUNTERCLOCKWISE * speed);
+  driveRight.write(MOTOR_CLOCKWISE * speed);
 }
 
-void robotForward(float speed) {
+void robotBackward(float speed) {
+  Serial.println("robot_y_status:-1");
+  driveLeft.write(MOTOR_CLOCKWISE * speed);
+  driveRight.write(MOTOR_COUNTERCLOCKWISE * speed);
+}
+
+void robotClockwise(float speed) {
+  Serial.println("robot_x_status:1");
   driveLeft.write(MOTOR_COUNTERCLOCKWISE * speed);
   driveRight.write(MOTOR_COUNTERCLOCKWISE * speed);
 }
 
-void robotBackward(float speed) {
+void robotCounterclockwise(float speed) {
+  Serial.println("robot_x_status:-1");
   driveLeft.write(MOTOR_CLOCKWISE * speed);
   driveRight.write(MOTOR_CLOCKWISE * speed);
 }
 
 void robotStop() {
+  Serial.println("robot_status:0");
   driveLeft.write(MOTOR_STATIONARY);
   driveRight.write(MOTOR_STATIONARY);
 }
@@ -266,6 +298,8 @@ void buttonUpdate() {
   for (auto& [index, button] : buttonMap) {
     button.wasPressed = button.pressed;
     button.pressed = gizmo.getButton(index);
+    // Serial.println("buttons_btn" + String(index) + "_pressed:" + String(button.pressed));
+    // Serial.println("buttons_btn" + String(index) + "_wasPressed:" + String(button.wasPressed));
   }
 }
 
@@ -276,7 +310,6 @@ bool buttonJustPressed(int index) {
   Button button = buttonMap[index];
 
   if (button.wasPressed == button.pressed) return false;
-  if (button.pressed == true) return true;
 
-  return false;
+  return button.pressed;
 }
