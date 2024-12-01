@@ -14,16 +14,12 @@ std::map<int, Button> buttonMap;
 const int MOTOR_CLOCKWISE = 180, MOTOR_COUNTERCLOCKWISE = 0, MOTOR_STATIONARY = 90;
 
 Servo driveLeft, driveRight;
-Servo hipServo, rakeServo;
-
-Servo mmmFloorLeft, mmmFloorRight;
+Servo rakeMotor;
 
 bool isAutonomous = false;
 
 int collisionSwitch = GIZMO_GPIO_1;
-
-bool mmmClosed = true;
-
+int rakePot = GIZMO_ADC_1;
 
 // The Gizmo provides access to the data that is held by the field
 // management system and the gizmo system processor.
@@ -56,29 +52,17 @@ void setup() {
 
   // Configure Pins
   pinMode(GIZMO_MOTOR_1, OUTPUT);
-  pinMode(GIZMO_MOTOR_2, OUTPUT);
   pinMode(GIZMO_MOTOR_3, OUTPUT);
-  pinMode(GIZMO_MOTOR_4, OUTPUT);
-
-  pinMode(GIZMO_SERVO_1, OUTPUT);
-  pinMode(GIZMO_SERVO_2, OUTPUT);
+  pinMode(GIZMO_MOTOR_2, OUTPUT);
 
   pinMode(collisionSwitch, INPUT);
+  pinMode(rakePot, INPUT);
 
   buttonInit();
   
   driveLeft.attach(GIZMO_MOTOR_3);
   driveRight.attach(GIZMO_MOTOR_1);
-
-  hipServo.attach(GIZMO_SERVO_3);
-  rakeServo.attach(GIZMO_SERVO_4);
-  rakeServo.write(0);
-  hipServo.write(0);
-
-  mmmFloorLeft.attach(GIZMO_SERVO_2);
-  mmmFloorLeft.write(0);
-  mmmFloorRight.attach(GIZMO_SERVO_1);
-  mmmFloorRight.write(0);
+  rakeMotor.attach(GIZMO_SERVO_2);
 }
 
 // Runs in a loop to perform tasks that are required to run the robot.
@@ -90,72 +74,7 @@ void loop() {
   // Refreshes the information about axis and button state.
   gizmo.refresh();
 
-  // if (buttonJustPressed(GIZMO_BUTTON_START)) {
-  //   isAutonomous = true;
-  // }
-
-  // if (buttonJustPressed(GIZMO_BUTTON_BACK)) {
-  //   isAutonomous = false;
-  // }
-
-  // Serial.println("auTask_isAutonomous:" + String(isAutonomous));
-
-  // if (isAutonomous) {
-  //   autonomousTask();
-  //   return;
-  // }
-
-  // // this is right next to the drive logic in order to override the drive commands sent if you are pressing the joysticks.
-  // if (gizmo.getAxis(GIZMO_AXIS_DY) == 254) {
-  //   robotBackward(1);
-  // }
-
-  // else if (gizmo.getAxis(GIZMO_AXIS_DY) == 0) {
-  //   robotForward(1);
-  // }
-
-  // else if (gizmo.getAxis(GIZMO_AXIS_DX) == 254) {
-  //   robotClockwise(1);
-  // }
-
-  // else if (gizmo.getAxis(GIZMO_AXIS_DX) == 0) {
-  //   robotCounterclockwise(1);
-  // }
-
-  // else {
-  //   robotStop();
-  // }
-
-  driveLogic();
-
-  // Serial.println("auTask_collisionSwitch:" + String(digitalRead(collisionSwitch)));
-
-  // Floor logic
-  if (buttonJustPressed(GIZMO_BUTTON_B)) {
-    servoToggle(mmmFloorLeft, 180, 0);
-    servoToggle(mmmFloorRight, 180, 0);
-
-    if (mmmClosed) {
-      mmmFloorRight.write(180);
-      mmmFloorLeft.write(0);
-    }
-
-    else {
-      mmmFloorRight.write(0);
-      mmmFloorLeft.write(180);
-    }
-
-    mmmClosed = !mmmClosed;
-  }
-
-  // HiP logic
-  if (buttonJustPressed(GIZMO_BUTTON_LSHOULDER)) {
-    // Full speed couterclockwwise
-    hipServo.write(90);
-  } else if (buttonJustPressed(GIZMO_BUTTON_LT)) {
-    // Full speed clockwise
-    hipServo.write(0);
-  }
+  axisDriveLogic();
 
   rakeLogic();
 
@@ -165,21 +84,34 @@ void loop() {
   delay(20);
 }
 
-void driveLogic() {
+void axisDriveLogic() {
   // Fetch the speed of each axis, then convert this to the range
   // expected by the motors.
   float targetL, targetR;
-  const float SPEED_MULTIPLIER = 1;
-  targetL = map(gizmo.getAxis(GIZMO_AXIS_LY), 0, 255, 180, 0) * SPEED_MULTIPLIER;
-  targetR = map(gizmo.getAxis(GIZMO_AXIS_RY), 0, 255, 0, 180) * SPEED_MULTIPLIER;
+  const float SPEED_MULTIPLIER = 0.5;
+  float axisL = gizmo.getAxis(GIZMO_AXIS_LY), axisR = gizmo.getAxis(GIZMO_AXIS_RY);
 
-  if (targetL != MOTOR_STATIONARY) {
-    driveLeft.write(targetL);
-  }
+  if (axisL == 0 || axisR == 0) return;
 
-   if (targetR != MOTOR_STATIONARY) {
-    driveRight.write(targetR);
-  }
+  targetL = map(axisL, 0, 255, 180, 0) * SPEED_MULTIPLIER;
+  targetR = map(axisR, 0, 255, 0, 180) * SPEED_MULTIPLIER;
+
+  driveLeft.write(targetL);
+  driveRight.write(targetR);
+}
+
+void padDriveLogic() {
+  // Read the D-pad values
+  int dpadX = gizmo.getAxis(GIZMO_AXIS_DX) - 127;  // Normalize to -128 to 128
+  int dpadY = gizmo.getAxis(GIZMO_AXIS_DY) - 127;  // Normalize to -128 to 128
+  
+  // Determine motor speeds based on D-pad input
+  int leftMotorSpeed = constrain(dpadY + dpadX, -128, 128) + 127;
+  int rightMotorSpeed = constrain(dpadY - dpadX, -128, 128) + 127;
+
+  // Set motor speeds
+  driveL.write(map(leftMotorSpeed, 0, 255, 0, 180));
+  driveR.write(map(rightMotorSpeed, 0, 255, 0, 180));
 }
 
 void servoToggle(Servo &servo, int min, int max) {
@@ -190,15 +122,16 @@ void servoToggle(Servo &servo, int min, int max) {
 
 void rakeLogic() {
   const int STEP_SIZE = 1;
-  const int RAKE_POS = rakeServo.read();
+  const int RAKE_POS = rakeMotor.read();
   const int MAX = 90, MIN = 0;
 
-  Serial.println("woooasodifjkasgD");
-
+  // RSHOuLDER and RT
   if (gizmo.getButton(GIZMO_BUTTON_RSHOULDER)) {
-    rakeServo.write(RAKE_POS + STEP_SIZE);
-  } else if (gizmo.getButton(GIZMO_BUTTON_RT)) {
-    rakeServo.write(RAKE_POS - STEP_SIZE);
+    rakeMotor.write(MOTOR_COUNTERCLOCKWISE);
+  }
+
+  else if (gizmo.getButton(GIZMO_BUTTON_RT)) {
+    rakeMotor.write(MOTOR_CLOCKWISE);
   }
 }
 
@@ -207,7 +140,7 @@ void autonomousTask() {
   delay(1000);
 
   // starting rake position
-  rakeServo.write(45);
+  setRakePosition(45);
 
   while(digitalRead(collisionSwitch) != HIGH) {
     robotBackward(1);
@@ -220,7 +153,7 @@ void autonomousTask() {
   }
 
   // lower rake all the way
-  rakeServo.write(0);
+  setRakePosition(120);
 
   const float BACKUP_SPEED = 0.25;
   robotBackward(BACKUP_SPEED);
@@ -235,9 +168,25 @@ void autonomousTask() {
   robotStop();
 
   // reset the rake
-  rakeServo.write(90);
+  setRakePosition(0);
 
   isAutonomous = false;
+}
+
+void setRakePosition(int posDegrees) {
+  // positions are in degrees with zero being straight up and down.
+  const POT_MAX = 1024, POT_MIN = 0;
+  int rakePos = map(analogRead(rakePot), POT_MIN, POT_MAX, 0, 300);
+
+  while (rakePos != posDegrees) {
+    if (posDegrees > rakePos) {
+      rakeMotor.write(MOTOR_CLOCKWISE);
+    }
+
+    else if (posDegrees < rakePos) {
+      rakeMotor.write(MOTOR_COUNTERCLOCKWISE);
+    }
+  }
 }
 
 void robotForward(float speed) {
