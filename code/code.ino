@@ -5,9 +5,7 @@
 struct Button {
   bool pressed;
   bool wasPressed;
-  unsigned long lastDebounceTime = 0;
-}; 
-unsigned long debounceDelay = 50;
+  }; 
 
 std::map<int, Button> buttonMap;
 
@@ -19,25 +17,17 @@ Servo rakeMotor;
 int collisionSwitchR = GIZMO_GPIO_8, collisionSwitchL = GIZMO_GPIO_2;
 int rakePot = GIZMO_ADC_1;
 
-// The Gizmo provides access to the data that is held by the field
-// management system and the gizmo system processor.
 Gizmo gizmo;
+
+bool isAutonomous = false;
 
 /*
   Drive left, right = Joystick L, R
   Rake up, Rake down = RB, RT
-  HiP up, HiP down = LB, LT
-  Manny Safety Bar = Btn-A
-  MMM floor = Btn-B
-
-*/
-
-/* Logging standards
-  ctx = function name, affected assembly, or general context
-  name = value name
-  val = actual value
-
-  Serial.println("ctx_name:val");
+  Rake to 45 degrees = LB
+  Rake to 90 = LT
+  Start autonomous = Start
+  Exit autonomous (only works before hitting the wall) = Back
 */
 
 // Initialize the hardware and configure libraries for use.
@@ -52,6 +42,7 @@ void setup() {
   pinMode(GIZMO_MOTOR_1, OUTPUT);
   pinMode(GIZMO_MOTOR_3, OUTPUT);
   pinMode(GIZMO_MOTOR_2, OUTPUT);
+  pinMode(GIZMO_MOTOR_4, OUTPUT);
 
   pinMode(collisionSwitchR, INPUT);
   pinMode(collisionSwitchL, INPUT);
@@ -59,7 +50,7 @@ void setup() {
 
   buttonInit();
   
-  driveLeft.attach(GIZMO_MOTOR_4);
+  driveLeft.attach(GIZMO_MOTOR_3);
   driveRight.attach(GIZMO_MOTOR_1);
   rakeMotor.attach(GIZMO_MOTOR_2);
 }
@@ -84,12 +75,9 @@ void loop() {
     setRakePosition(90);
   }
 
-  // if (buttonJustPressed(GIZMO_BUTTON_START)) {
-  //   autonomousTask();
-  // }
-
-  Serial.println("left:" + String(digitalRead(collisionSwitchL)));
-  Serial.println("right:" + String(digitalRead(collisionSwitchR)));
+  if (buttonJustPressed(GIZMO_BUTTON_START)) {
+    autonomousTask();
+  }
 
   rakeLogic();
 
@@ -115,16 +103,14 @@ void axisDriveLogic() {
 
 void padDriveLogic() {
   // Read the D-pad values
-  int dpadX = gizmo.getAxis(GIZMO_AXIS_DX);  // Normalize to -128 to 128
-  int dpadY = gizmo.getAxis(GIZMO_AXIS_DY);  // Normalize to -128 to 128
+  int dpadX = gizmo.getAxis(GIZMO_AXIS_DX);
+  int dpadY = gizmo.getAxis(GIZMO_AXIS_DY);
   
-  // Determine motor speeds based on D-pad input
-  int leftMotorSpeed = 0;
-  int rightMotorSpeed = constrain(dpadY - dpadX, -128, 128) + 127;
+  float targetL = map(dpadY, 0, 255, 180, 0), targetR = map(dpadY, 0, 255, 0, 180);
 
   // Set motor speeds
-  driveLeft.write(leftMotorSpeed);
-  driveRight.write(rightMotorSpeed);  
+  driveLeft.write(targetL);
+  driveRight.write(targetR);  
 }
 
 void servoToggle(Servo &servo, int min, int max) {
@@ -150,22 +136,33 @@ void rakeLogic() {
 }
 
 void autonomousTask() {
+  /*
+    Stage 1 = Setup
+    Stage 2 = Drive until wall
+    Stage 3 = Back up until rake in correct pos
+    Stage 4 = Drop Rake
+    Stage 5 = Back up until line
+    Stage 6 = Reset
+  */
+
+  isAutonomous = true;
+
   // pause for dramatic effect 💅
   delay(1000);
 
-  // starting rake position
-  setRakePosition(55);
+// STAGE 1
+  const int START_POS_DEGREES = 65;
+  // the move command is more accurate going up rather than down. this was easier than making it accurate lol
+  setRakePosition(START_POS_DEGREES - 5);
+  setRakePosition(START_POS_DEGREES);
 
+// STAGE 2
+  const float STAGE_2_SPEED = 0.5;
   bool switchL = false, switchR = false;
-  while(!switchL || !switchR) {
-    if (!switchL) {
-      driveLeft.write(MOTOR_COUNTERCLOCKWISE);
-    }
+  while(!switchR) {
+    robotForward(STAGE_2_SPEED);   
 
-    if (!switchR) {
-      driveRight.write(MOTOR_CLOCKWISE);
-    }
-
+    gizmo.refresh();
     // allows for task cancelling
     if (gizmo.getButton(GIZMO_BUTTON_BACK)) {
       return;
@@ -176,25 +173,40 @@ void autonomousTask() {
   }
   robotStop();
 
-  // lower rake all the way
-  setRakePosition(120);
+// STAGE 3
+  const float STAGE_3_SPEED = 0.25;
+  robotBackward(STAGE_3_SPEED);
+  const float STAGE_3_BACKUP_S = 1.1;
+  delay(STAGE_3_BACKUP_S * 1000);
+  robotStop();
 
-  const float BACKUP_SPEED = 0.25;
+// STAGE 4
+  rakeMotor.write(MOTOR_CLOCKWISE);
+  const int STAGE_4_BACKUP_S = 1;
+  delay(STAGE_4_BACKUP_S * 1000);
+  rakeMotor.write(MOTOR_STATIONARY);
+
+// STAGE 5
+  const float BACKUP_SPEED = 0.5;
   robotBackward(BACKUP_SPEED);
 
-  // time for a backup at top speed
-  const float DRIVE_TIME_SECONDS = .9;
-  // time for a backup at set speed
+  // // time for a backup at top speed
+  const float DRIVE_TIME_SECONDS = 2;
+  // // time for a backup at set speed
   const float DRIVE_TIME_ADJUSTED = DRIVE_TIME_SECONDS * (1/BACKUP_SPEED);
 
   delay(DRIVE_TIME_ADJUSTED * 1000);
 
   robotStop();
 
-  // reset the rake
-  setRakePosition(0);
+// STAGE 6
+  const int END_POS = 20;
+  setRakePosition(END_POS);
+  isAutonomous = false;
+  return;
 }
 
+// sets the rake to a specific position in degrees
 void setRakePosition(int posDegrees) {
   int rakePos = getRakePosition();
 
@@ -208,44 +220,84 @@ void setRakePosition(int posDegrees) {
     }
 
     rakePos = getRakePosition();
+
+    // this is autonomous task code only - we had this problem with the rake getting pinned and the spool spinning infinitely in a giant loop...
+    if (isAutonomous && (digitalRead(collisionSwitchR) == HIGH || digitalRead(collisionSwitchL) == HIGH)) {
+      rakeMotor.write(MOTOR_STATIONARY);
+      return;
+    }
   }
+  rakeMotor.write(MOTOR_STATIONARY);
 }
 
+// returns the rake's position in degrees
 int getRakePosition() {
-  const int POT_MAX = 695, POT_MIN = 250;
-  return map(analogRead(rakePot), POT_MIN, POT_MAX, 0, 92);
+  // you have to change these values if you change environments or if humidity has changed a lot.
+  const int POT_MAX = 722, POT_MIN = 254;
+
+  // I added these dirty hacky offsets. The values should be right, but for some reason they weren't, and it made sense to me to put it on a scale of 0-92 + 5... no clue... 
+  return map(analogRead(rakePot), POT_MIN, POT_MAX, 0, 92) + 5;
 }
+
+/*
+  The motors (for some reason) operate using 90 as stationary, with 180 rotating one direction and 0 rotating the other at full speed. 
+  These functions allow you to use a value between 0 and 1 for speed instead. (because that makes more sense)
+  Basically the idea is that if we want to travel at full speed straight forward we take 180 on one wheel, and 0 on the other.
+  Initially in development we (I) tried to add in variable speed control by just multiplying the top speed by the percent speed. 180 * 0.25. 
+  Unsure how this ever made sense to me as that literally equals 45 which drives the motor in the opposite direction at half speed. Double failure. 
+  After some actual critical thinking I realized a solution. Say we take a variable called "offset". Let offset equal 90 * our percent speed.
+  Now if we want to move clockwise at quarter speed, we take 90 and add our offset to it.
+
+    offset = 22.5
+    motor.write(90 + offset) 
+    
+  this writes 112.5 to the motor, which is quarter-speed
+
+  there's probably a better way to do this with map functions, but I wrote that code less than 72 hours before competition day lol, 
+*/
 
 void robotForward(float speed) {
-  Serial.println("robot_y_status:1");
-  driveLeft.write(MOTOR_COUNTERCLOCKWISE * speed);
-  driveRight.write(MOTOR_CLOCKWISE * speed);
+  float offset = MOTOR_STATIONARY * speed;
+  driveLeft.write(MOTOR_STATIONARY + offset);
+  driveRight.write(MOTOR_STATIONARY - offset);
 }
 
 void robotBackward(float speed) {
-  Serial.println("robot_y_status:-1");
-  driveLeft.write(MOTOR_CLOCKWISE * speed);
-  driveRight.write(MOTOR_COUNTERCLOCKWISE * speed);
+  float offset = MOTOR_STATIONARY * speed;
+  driveLeft.write(MOTOR_STATIONARY - offset);
+  driveRight.write(MOTOR_STATIONARY + offset);
 }
 
 void robotClockwise(float speed) {
-  Serial.println("robot_x_status:1");
-  driveLeft.write(MOTOR_COUNTERCLOCKWISE * speed);
-  driveRight.write(MOTOR_COUNTERCLOCKWISE * speed);
+  float offset = MOTOR_STATIONARY * speed;
+  driveLeft.write(MOTOR_STATIONARY + offset);
+  driveRight.write(MOTOR_STATIONARY + offset);
 }
 
 void robotCounterclockwise(float speed) {
-  Serial.println("robot_x_status:-1");
-  driveLeft.write(MOTOR_CLOCKWISE * speed);
-  driveRight.write(MOTOR_CLOCKWISE * speed);
+  float offset = MOTOR_STATIONARY * speed;
+  driveLeft.write(MOTOR_STATIONARY - offset);
+  driveRight.write(MOTOR_STATIONARY - offset);
 }
 
 void robotStop() {
-  Serial.println("robot_status:0");
   driveLeft.write(MOTOR_STATIONARY);
   driveRight.write(MOTOR_STATIONARY);
 }
 
+/*
+  So this is called button debounce
+
+  I have no idea what debounce is sposeda mean, but basically we're just turning the raw button is pressed data that we get from Gizmo, and turning that into button pressed checks
+
+  There are several much better written articles/papers (ik because i read them to learn how to code this lol)
+
+  basically we just keep track of whether or not each button is pressed this tick of the loop, and if it was pressed last tick.
+  if the button was pressed last tick and it isn't anymore, then the button was just let go. if it wasn't pressed, but now it is, then it was just clicked down. 
+  i opted for the function to only return true when the button was just pressed down as this seemed more standard.
+*/
+
+// creates the list of buttons that we use and sets them up
 void buttonInit() {
   int buttons[12] = {
     GIZMO_BUTTON_X,          
@@ -267,25 +319,24 @@ void buttonInit() {
   }
 }
 
-// button debounce logic
+
+// updates each buttons value
 void buttonUpdate() {
   // update was pressed and is pressed
   // update last time button pressed
   for (auto& [index, button] : buttonMap) {
     button.wasPressed = button.pressed;
     button.pressed = gizmo.getButton(index);
-    // Serial.println("buttons_btn" + String(index) + "_pressed:" + String(button.pressed));
-    // Serial.println("buttons_btn" + String(index) + "_wasPressed:" + String(button.wasPressed));
   }
 }
 
+// actual method for checking if a button was just pressed
 bool buttonJustPressed(int index) {
   // saves a little bit of time, but mostly this was useful for debugging
   if (gizmo.getButton(index) == 0) return false;
 
   Button button = buttonMap[index];
 
-  if (button.wasPressed == button.pressed) return false;
-
-  return button.pressed;
+  // only return true if the button wasn't pressed last frame, and is pressed now
+  return !button.wasPressed && button.pressed;
 }
